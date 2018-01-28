@@ -1,0 +1,136 @@
+---
+title: "Practical Machine Learning wk 4 course work"
+author: "Matti Niemistö"
+date: "January 28, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Instructions for the course project
+
+The goal of your project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases.
+
+## Let's get started, load and look at the data
+
+```{r}
+library(caret)
+library(doParallel)
+registerDoParallel(cores=2)
+if(!file.exists("pml-training.csv"))
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
+if(!file.exists("pml-testing.csv"))
+  download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", "pml-testing.csv")
+training <- read.csv("pml-training.csv")
+testing <- read.csv("pml-testing.csv")
+dim(training)
+dim(testing)
+
+```
+
+So the total number of variables is quite big, 160. There are 19622 observations in the training set and 20 observations in the test set. For sake of saving some screen length summaries and/or str of the data is not presented here, see end of document for listings.
+
+## Steps in the exercise
+1) build model(s)
+2) cross validate
+3) estimate out of sample error rate
+4) explain made choices
+
+
+## Some data  cleaning
+OK there seems to be a lot of missing values in some of the variables. Let's check the situation
+
+```{r}
+nas <- is.na(training)
+sums <- apply(nas, 2, sum)
+```
+
+Looks like some variables have 19216 missing datapoints out of the 19622 observations. Let's make a guestimate that these can be omitted. Most likely this move will make me fail making 20/20 in the prediction quiz, but newertheless this is the chosen path
+
+```{r}
+train2 <- training[,sums <= 10000]
+sum(is.na(train2))
+```
+OK. we are left with 93 variables and none of them have any missing values left.
+
+#Building models
+Let's first see what are the possible outcomes that we are trying to predict. Also, let's build the data frames for building the model and cross validation
+
+```{r}
+levels(training$classe)
+inbuild <- createDataPartition(y = training$classe, p = 0.7, list = FALSE)
+validation <- train2[-inbuild,]
+buildData <- train2[inbuild,]
+```
+
+So the decision was to use 70% of the data for building the models and 30% of the data for validation. This should do it. After some googling it seems that Naive Bayes, Neural Networks and SVM are good choices for multi-class classification. In this exercise I'm going to start with SVM adn later try Naive Bayes as Neural nets are well covered in Deep Learning Specialization (which I highly recommend as well :) )
+
+## SVM
+
+Next, let's fit a svm model with all possible remaining variables. By setting the method repeatedcv we do cross validation while building model. The data is split to 10 folds and the whole process is repeated 3 times.(Note to run this code, remove eval=F)
+
+```{r, eval=F, echo=T}
+
+trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
+set.seed(3233)
+
+mod1 <- train(classe ~., data = buildData, method = "svmLinear",
+                 trControl=trctrl,
+                 preProcess = c("center", "scale"),
+                 tuneLength = 10)
+## Save model for future use
+saveRDS(mod1, "./mod1.rds")
+```
+ 
+Appararently the was a lot of data, training the model took almost 2h. Let's predict on the validation set using our new model and see what the confusion matrix looks like.
+ 
+ 
+```{r}
+## load pre-saved model to avoid 2h re-train in every iteration
+mod1 <- readRDS("./mod1.rds")
+mod1_pred <- predict(mod1, newdata = validation)
+mod1$finalModel
+confusionMatrix(mod1_pred, validation$classe)
+```
+
+But was it worth the wait? finalModel tells us that we got C-svc type svm with training error of 0. This sounds great but raises a concern of overfitted model. confusionMatrix also tells that Accuracy is 1 so it will be very interesting to see whether or not the model will give poor results when predicting on the test set. Also the 95% confidence interval is 0.9994, 1, so out of sample error rate should basically be 0. This can be also verified from the Reference-Prediction matrix produced by the confusionMatrix call. Looks perfect, which obviously cannot be the case and remains to be seen how well the model generalizes on the test set.
+
+## Naive-Bayes
+Still trying the Naive-Bayes model to see how it compares to the (apparently) so well working SVM model. (Note to run this code, remove eval=F)
+
+```{r, eval=F, echo=T}
+mod2 <- train(classe ~., data = buildData, method = "naive_bayes",
+                 trControl=trctrl,
+                 preProcess = c("center", "scale"),
+                 tuneLength = 10)
+## Save model for future use
+saveRDS(mod2, "./mod2.rds")
+```
+
+```{r}
+## load pre-saved model to avoid 2h re-train in every iteration
+mod2 <- readRDS("./mod2.rds")
+mod2_pred <- predict(mod2, newdata = validation)
+mod2$finalModel
+confusionMatrix(mod2_pred, validation$classe)
+```
+
+Clearly this model is bad. Accuracy is only 0.18 and all predictions end up being class E. Due to time constraints (and good first model) I'll stop here without further debugging what went wrong in the model.
+
+## Conclusions and reasoning
+
+So the winner in this case was model mod1 with accuracy 1 of  and out of sample error of 0 and the validation set, which was 30% of the training set. Cross validation was done during model built time by using options repeatedcv, 10 folds and 3 repeats. It will be interesting see how it works with the test set.
+
+Key steps to achieve these results was to eliminate from the dataset the 67 variables which were almost totally NA in the dataset. SVM and Naive-Bayes were chosen as model types as they tend to work well on multiclass classification problems which seemed to be the case this time as well. I chose to use all remaining 92 predictors (not counting classe) as there was not clear vision or intuition which of them (if any) could be left out.
+
+## Appendix
+
+more information about the traingin and test data sets.
+
+```{r}
+str(training)
+str(testing)
+```
+
