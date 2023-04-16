@@ -17,8 +17,8 @@ The goal of your project is to predict the manner in which they did the exercise
 
 ```{r}
 library(caret)
-##library(doParallel)
-##registerDoParallel(cores=2)
+library(doParallel)
+registerDoParallel(cores=2)
 if(!file.exists("pml-training.csv"))
   download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", "pml-training.csv")
 if(!file.exists("pml-testing.csv"))
@@ -69,13 +69,15 @@ So the decision was to use 70% of the data for building the models and 30% of th
 
 ## SVM
 
-Next, let's fit a svm model with all possible remaining variables. By setting the method repeatedcv we do cross validation while building model. The data is split to 10 folds and the whole process is repeated 3 times.(Note to run this code, remove eval=F)
+Next, let's fit a svm model with all possible remaining variables. By setting the method repeatedcv we do cross validation while building model. The data is split to 10 folds and the whole process is repeated 3 times.
 
-```{r, eval=F, echo=T}
-
+```{r}
 trctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 3)
 set.seed(3233)
+```
 
+
+```{r, eval=F, echo=T}
 mod1 <- train(classe ~., data = buildData, method = "svmLinear",
                  trControl=trctrl,
                  preProcess = c("center", "scale"),
@@ -97,6 +99,8 @@ confusionMatrix(mod1_pred, validation$classe)
 
 But was it worth the wait? finalModel tells us that we got C-svc type svm with training error of 0. This sounds great but raises a concern of overfitted model. confusionMatrix also tells that Accuracy is 1 so it will be very interesting to see whether or not the model will give poor results when predicting on the test set. Also the 95% confidence interval is 0.9994, 1, so out of sample error rate should basically be 0. This can be also verified from the Reference-Prediction matrix produced by the confusionMatrix call. Looks perfect, which obviously cannot be the case and remains to be seen how well the model generalizes on the test set.
 
+EDIT: Like expected the model was badly overfitted and ended up classifying plain A's in the test set.
+
 ## Naive-Bayes
 Still trying the Naive-Bayes model to see how it compares to the (apparently) so well working SVM model. (Note to run this code, remove eval=F)
 
@@ -117,33 +121,100 @@ mod2$finalModel
 confusionMatrix(mod2_pred, validation$classe)
 ```
 
-Clearly this model is bad. Accuracy is only 0.18 and all predictions end up being class E. Due to time constraints (and good first model) I'll stop here without further debugging what went wrong in the model.
+This model was really bad. Accuracy is only 0.18 and all cross validation classification items ended up being class E. I'll stop here without further debugging what went wrong in the model.
 
 ## SVM again, but with limited variables
 
 Re-reading the instructions the goal was to predict classe with accelometer data from arm, forearm, belt and dumbbell. Let's re-build the data sets and the SVM model.
 
 ```{r}
-tr2 <- train2[,c("classe", "accel_forearm_x","accel_forearm_y", "accel_forearm_z", "total_accel_forearm", "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "total_accel_dumbbell", "accel_arm_x","accel_arm_y", "accel_arm_z", "total_accel_arm", "accel_belt_x","accel_belt_y", "accel_belt_z", "total_accel_belt")]
+treeni3 <- train2[,c("classe", "accel_forearm_x","accel_forearm_y", "accel_forearm_z", "total_accel_forearm", "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "total_accel_dumbbell", "accel_arm_x","accel_arm_y", "accel_arm_z", "total_accel_arm", "accel_belt_x","accel_belt_y", "accel_belt_z", "total_accel_belt")]
 
-te2 <- testing[,c("accel_forearm_x","accel_forearm_y", "accel_forearm_z", "total_accel_forearm", "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "total_accel_dumbbell", "accel_arm_x","accel_arm_y", "accel_arm_z", "total_accel_arm", "accel_belt_x","accel_belt_y", "accel_belt_z", "total_accel_belt")]
+testi3 <- testing[,c("accel_forearm_x","accel_forearm_y", "accel_forearm_z", "total_accel_forearm", "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "total_accel_dumbbell", "accel_arm_x","accel_arm_y", "accel_arm_z", "total_accel_arm", "accel_belt_x","accel_belt_y", "accel_belt_z", "total_accel_belt")]
 
-build <- createDataPartition(y = tr2$classe, p = 0.7, list = FALSE)
-valid <- tr2[-build,]
-bData <- tr2[build,]
+build3 <- createDataPartition(y = treeni3$classe, p = 0.7, list = FALSE)
+valid3 <- treeni3[-build3,]
+bData3 <- treeni3[build3,]
+```
 
-mod3 <- train(classe ~., data = tr2, method = "svmLinear",
+```{r, eval=F, echo=T}
+mod3 <- train(classe ~., data = bData, method = "svmLinear",
               trControl=trctrl,
               preProcess = c("center", "scale"),
               tuneLength = 10)
+saveRDS(mod3, "./mod3.rds")
 ```
 
 
+## Look at the results
+```{r}
+mod3 <- readRDS("./mod3.rds")
+mod3_pred <- predict(mod3, newdata = valid3)
+mod3$finalModel
+confusionMatrix(mod3_pred, valid3$classe)
+```
+
+The model looks bad, accuracy is only around 55%. So just using the accelerometer values in not enough to build a valid classification model. Let's include more variables
+
+```{r}
+treeni4 <- train2[,c("classe", "roll_belt", "roll_arm", "roll_dumbbell", "roll_forearm", "pitch_belt", "pitch_arm", "pitch_dumbbell", "pitch_forearm", "yaw_belt", "yaw_arm", "yaw_dumbbell", "yaw_forearm", "accel_forearm_x","accel_forearm_y", "accel_forearm_z", "total_accel_forearm", "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "total_accel_dumbbell", "accel_arm_x","accel_arm_y", "accel_arm_z", "total_accel_arm", "accel_belt_x","accel_belt_y", "accel_belt_z", "total_accel_belt", "gyros_belt_x", "gyros_belt_y", "gyros_belt_z", "magnet_belt_x", "magnet_belt_y", "magnet_belt_z", "gyros_arm_x", "gyros_arm_y", "gyros_arm_z", "gyros_dumbbell_x", "gyros_dumbbell_y", "gyros_dumbbell_z", "gyros_forearm_x", "gyros_forearm_y", "gyros_forearm_x", "magnet_arm_x", "magnet_arm_y", "magnet_arm_z", "magnet_dumbbell_x", "magnet_dumbbell_y", "magnet_dumbbell_z", "magnet_forearm_x", "magnet_forearm_y", "magnet_forearm_z")]
+
+testi4 <- testing[,c("roll_belt", "roll_arm", "roll_dumbbell", "roll_forearm", "pitch_belt", "pitch_arm", "pitch_dumbbell", "pitch_forearm", "yaw_belt", "yaw_arm", "yaw_dumbbell", "yaw_forearm", "accel_forearm_x","accel_forearm_y", "accel_forearm_z", "total_accel_forearm", "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "total_accel_dumbbell", "accel_arm_x","accel_arm_y", "accel_arm_z", "total_accel_arm", "accel_belt_x","accel_belt_y", "accel_belt_z", "total_accel_belt", "gyros_belt_x", "gyros_belt_y", "gyros_belt_z", "magnet_belt_x", "magnet_belt_y", "magnet_belt_z", "gyros_arm_x", "gyros_arm_y", "gyros_arm_z", "gyros_dumbbell_x", "gyros_dumbbell_y", "gyros_dumbbell_z", "gyros_forearm_x", "gyros_forearm_y", "gyros_forearm_x", "magnet_arm_x", "magnet_arm_y", "magnet_arm_z", "magnet_dumbbell_x", "magnet_dumbbell_y", "magnet_dumbbell_z", "magnet_forearm_x", "magnet_forearm_y", "magnet_forearm_z")]
+
+build4 <- createDataPartition(y = treeni4$classe, p = 0.7, list = FALSE)
+valid4 <- treeni4[-build4,]
+bData4 <- treeni4[build4,]
+```
+
+```{r, eval=F, echo=T}
+mod4 <- train(classe ~., data = bData4, method = "svmLinear",
+              trControl=trctrl,
+              preProcess = c("center", "scale"),
+              tuneLength = 10)
+saveRDS(mod4, "./mod4.rds")
+```
+
+```{r}
+mod4 <- readRDS("./mod4.rds")
+mod4_pred <- predict(mod4, newdata = valid4)
+mod4$finalModel
+confusionMatrix(mod4_pred, valid4$classe)
+```
+
+Better, accuracy is now ~79% but still not sufficient. After many more frustrating trials and reading I ended up building following model.
+
+```{r}
+treeni5 <- train2[,c("classe", "user_name", "roll_belt", "roll_arm", "roll_dumbbell", "roll_forearm", "pitch_belt", "pitch_arm", "pitch_dumbbell", "pitch_forearm", "yaw_belt", "yaw_arm", "yaw_dumbbell", "yaw_forearm", "accel_forearm_x","accel_forearm_y", "accel_forearm_z", "total_accel_forearm", "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "total_accel_dumbbell", "accel_arm_x","accel_arm_y", "accel_arm_z", "total_accel_arm", "accel_belt_x","accel_belt_y", "accel_belt_z", "total_accel_belt", "gyros_belt_x", "gyros_belt_y", "gyros_belt_z", "magnet_belt_x", "magnet_belt_y", "magnet_belt_z", "gyros_arm_x", "gyros_arm_y", "gyros_arm_z", "gyros_dumbbell_x", "gyros_dumbbell_y", "gyros_dumbbell_z", "gyros_forearm_x", "gyros_forearm_y", "gyros_forearm_x", "magnet_arm_x", "magnet_arm_y", "magnet_arm_z", "magnet_dumbbell_x", "magnet_dumbbell_y", "magnet_dumbbell_z", "magnet_forearm_x", "magnet_forearm_y", "magnet_forearm_z")]
+
+testi5 <- testing[,c("user_name", "roll_belt", "roll_arm", "roll_dumbbell", "roll_forearm", "pitch_belt", "pitch_arm", "pitch_dumbbell", "pitch_forearm", "yaw_belt", "yaw_arm", "yaw_dumbbell", "yaw_forearm", "accel_forearm_x","accel_forearm_y", "accel_forearm_z", "total_accel_forearm", "accel_dumbbell_x", "accel_dumbbell_y", "accel_dumbbell_z", "total_accel_dumbbell", "accel_arm_x","accel_arm_y", "accel_arm_z", "total_accel_arm", "accel_belt_x","accel_belt_y", "accel_belt_z", "total_accel_belt", "gyros_belt_x", "gyros_belt_y", "gyros_belt_z", "magnet_belt_x", "magnet_belt_y", "magnet_belt_z", "gyros_arm_x", "gyros_arm_y", "gyros_arm_z", "gyros_dumbbell_x", "gyros_dumbbell_y", "gyros_dumbbell_z", "gyros_forearm_x", "gyros_forearm_y", "gyros_forearm_x", "magnet_arm_x", "magnet_arm_y", "magnet_arm_z", "magnet_dumbbell_x", "magnet_dumbbell_y", "magnet_dumbbell_z", "magnet_forearm_x", "magnet_forearm_y", "magnet_forearm_z")]
+
+build5 <- createDataPartition(y = treeni5$classe, p = 0.7, list = FALSE)
+valid5 <- treeni5[-build5,]
+bData5 <- treeni5[build5,]
+```
+
+```{r, eval=F, echo=T}
+mod5 <- train(classe ~., data = bData5, method = "svmRadial",
+              trControl=trctrl,
+              preProcess = c("center", "scale"),
+              tuneLength = 10)
+saveRDS(mod5, "./mod5.rds")
+```
+
+```{r}
+mod5 <- readRDS("./mod5.rds")
+mod5_pred <- predict(mod5, newdata = valid5)
+mod5$finalModel
+confusionMatrix(mod5_pred, valid5$classe)
+```
+
+Finally a model that seems to perform very well on the cross validation data but does not seem to be (hopefully) overfitted. It will be interesting to see how the model will perform on the final course quiz.
+
 ## Conclusions and reasoning
 
-So the winner in this case was model mod1 with accuracy 1 of  and out of sample error of 0 and the validation set, which was 30% of the training set. Cross validation was done during model built time by using options repeatedcv, 10 folds and 3 repeats. It will be interesting see how it works with the test set.
+So the winner in this case was model mod6 with accuracy close 1 of  and out of sample error close to 0 on the validation set, which was 30% of the training set. Cross validation was already done during model built time by using options repeatedcv, 10 folds and 3 repeats. As sanity check remaining 30% was used to cross validate the model before selecting it as the final model. It will be interesting see how it works with the test set.
 
-Key steps to achieve these results was to eliminate from the dataset the 67 variables which were almost totally NA in the dataset. SVM and Naive-Bayes were chosen as model types as they tend to work well on multiclass classification problems which seemed to be the case this time as well. I chose to use all remaining 92 predictors (not counting classe) as there was not clear vision or intuition which of them (if any) could be left out.
+Key steps to achieve these results was to eliminate unnecessary variables from the data set basically by trial and error. In retrospect some other mechanism could have made sense as well, like trying PCA on the preprosessing phase. Newertheless, this was a good learning experiment. SVM and Naive-Bayes were chosen as model types as they tend to work well on (multiclass) classification problems. Neural nets were omitted for personal reasons as I study them currently on a separate course.
 
 ## Appendix
 
